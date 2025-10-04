@@ -1,74 +1,51 @@
-// api/tweet.js  (Vercel Serverless Function)
-const crypto = require("crypto");
-const OAuth = require("oauth-1.0a");
+import crypto from "crypto";
+import OAuth from "oauth-1.0a";
 
-// Build OAuth1 signer
 const oauth = OAuth({
   consumer: {
-    key: process.env.TWITTER_API_KEY,      // API Key (Consumer Key)
-    secret: process.env.TWITTER_API_SECRET // API Secret Key (Consumer Secret)
+    key: process.env.TWITTER_API_KEY,
+    secret: process.env.TWITTER_API_SECRET,
   },
   signature_method: "HMAC-SHA1",
   hash_function(baseString, key) {
     return crypto.createHmac("sha1", key).update(baseString).digest("base64");
-  }
+  },
 });
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") {
-      res.statusCode = 405;
-      return res.json({ error: "Method not allowed" });
-    }
+    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-    // Simple shared-secret check so only Make can call this
     const secret = req.headers["x-webhook-secret"];
     if (!secret || secret !== process.env.WEBHOOK_SECRET) {
-      res.statusCode = 401;
-      return res.json({ error: "Unauthorized" });
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // Parse JSON body
-    const bodyJson = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-    const text = (bodyJson.text || "").toString();
-    const media_ids = Array.isArray(bodyJson.media_ids) ? bodyJson.media_ids.filter(Boolean) : [];
-
-    if (!text) {
-      res.statusCode = 400;
-      return res.json({ error: "Missing text" });
-    }
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const text = (body.text || "").toString();
+    const media_ids = Array.isArray(body.media_ids) ? body.media_ids.filter(Boolean) : [];
+    if (!text) return res.status(400).json({ error: "Missing text" });
 
     const url = "https://api.twitter.com/2/tweets";
-    const requestData = { url, method: "POST" };
-
     const token = {
-      key: process.env.TWITTER_ACCESS_TOKEN,     // Access Token
-      secret: process.env.TWITTER_ACCESS_SECRET  // Access Token Secret
+      key: process.env.TWITTER_ACCESS_TOKEN,
+      secret: process.env.TWITTER_ACCESS_SECRET,
     };
-
     const payload = media_ids.length ? { text, media: { media_ids } } : { text };
+
+    const requestData = { url, method: "POST" };
     const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
 
     const resp = await fetch(url, {
       method: "POST",
-      headers: {
-        ...authHeader,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(payload)
+      headers: { ...authHeader, "content-type": "application/json" },
+      body: JSON.stringify(payload),
     });
 
     const data = await resp.json();
-
-    if (!resp.ok) {
-      res.statusCode = resp.status;
-      return res.json({ error: data });
-    }
-
-    res.statusCode = 200;
-    return res.json(data);
-  } catch (err) {
-    res.statusCode = 500;
-    return res.json({ error: err?.message || "Unknown error" });
+    if (!resp.ok) return res.status(resp.status).json({ error: data });
+    return res.status(200).json(data);
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || "Unknown error" });
   }
-};
+}
